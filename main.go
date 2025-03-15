@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+
+	"github.com/gorilla/handlers"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -44,8 +47,20 @@ func main() {
 	r.HandleFunc("/api/device/status", createDeviceStatus).Methods("POST")
 	r.HandleFunc("/api/device/status/{serialNo}", getLatestDeviceStatus).Methods("GET")
 
+	corsOpts := handlers.CORS(
+		handlers.AllowedOrigins([]string{"*"}), // In production, specify exact origins
+		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
+		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
+		handlers.AllowCredentials(),
+	)
+
+	loggedRouter := handlers.LoggingHandler(os.Stdout, r)
+
+	// Apply CORS middleware and logging to router
+	http.Handle("/", corsOpts(loggedRouter))
+
 	fmt.Println("Server started at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func createTables() {
@@ -70,6 +85,7 @@ func createTables() {
 }
 
 func createDeviceStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var status map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&status); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -84,7 +100,6 @@ func createDeviceStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Extract device name from the request
 	name, _ := status["name"].(string)
-	// Name is optional, so we don't return an error if it's missing
 
 	query := `INSERT INTO device_status (serial_no, name, data) VALUES ($1, $2, $3) RETURNING id`
 	var id int
@@ -104,6 +119,7 @@ func createDeviceStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func getLatestDeviceStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
 	serialNo := vars["serialNo"]
 
