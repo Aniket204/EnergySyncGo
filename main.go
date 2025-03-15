@@ -53,6 +53,7 @@ func createTables() {
     CREATE TABLE IF NOT EXISTS device_status (
         id SERIAL PRIMARY KEY,
         serial_no TEXT NOT NULL,
+        name TEXT,
         timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         data JSONB NOT NULL
     );
@@ -81,7 +82,11 @@ func createDeviceStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `INSERT INTO device_status (serial_no, data) VALUES ($1, $2) RETURNING id`
+	// Extract device name from the request
+	name, _ := status["name"].(string)
+	// Name is optional, so we don't return an error if it's missing
+
+	query := `INSERT INTO device_status (serial_no, name, data) VALUES ($1, $2, $3) RETURNING id`
 	var id int
 	dataJSON, err := json.Marshal(status)
 	if err != nil {
@@ -89,7 +94,7 @@ func createDeviceStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = db.QueryRow(query, serialNo, dataJSON).Scan(&id)
+	err = db.QueryRow(query, serialNo, name, dataJSON).Scan(&id)
 	if err != nil {
 		http.Error(w, "Failed to insert record", http.StatusInternalServerError)
 		return
@@ -102,13 +107,14 @@ func getLatestDeviceStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	serialNo := vars["serialNo"]
 
-	query := `SELECT id, serial_no, timestamp, data FROM device_status WHERE serial_no = $1 ORDER BY timestamp DESC LIMIT 1`
+	query := `SELECT id, serial_no, name, timestamp, data FROM device_status WHERE serial_no = $1 ORDER BY timestamp DESC LIMIT 1`
 	var id int
 	var serial string
+	var name sql.NullString
 	var timestamp string
 	var dataJSON []byte
 
-	err := db.QueryRow(query, serialNo).Scan(&id, &serial, &timestamp, &dataJSON)
+	err := db.QueryRow(query, serialNo).Scan(&id, &serial, &name, &timestamp, &dataJSON)
 	if err != nil {
 		http.Error(w, "Device status not found", http.StatusNotFound)
 		return
@@ -120,9 +126,16 @@ func getLatestDeviceStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use the device name if available
+	deviceName := ""
+	if name.Valid {
+		deviceName = name.String
+	}
+
 	response := map[string]interface{}{
 		"id":        id,
 		"serialNo":  serial,
+		"name":      deviceName,
 		"timestamp": timestamp,
 		"data":      data,
 	}
